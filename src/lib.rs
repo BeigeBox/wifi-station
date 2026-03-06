@@ -1,0 +1,274 @@
+use std::path::Path;
+
+use serde::Serialize;
+
+mod client;
+mod config;
+mod diagnostics;
+mod monitor;
+mod recovery;
+mod routing;
+mod scan;
+
+pub use config::{format_wpa_conf, read_ssid_from_wpa_conf, update_wpa_conf};
+pub use monitor::run_wifi_client;
+pub use scan::{WifiNetwork, scan_wifi_networks};
+
+#[cfg(test)]
+pub(crate) use config::update_wpa_conf_at;
+#[cfg(test)]
+pub(crate) use routing::parse_default_route;
+#[cfg(test)]
+pub(crate) use scan::parse_iw_scan;
+
+#[derive(Clone, Default)]
+pub struct WifiConfig {
+    pub wifi_enabled: bool,
+    pub dns_servers: Option<Vec<String>>,
+    pub wifi_ssid: Option<String>,
+    pub wifi_password: Option<String>,
+    pub wpa_supplicant_bin: Option<String>,
+    pub hostapd_conf: Option<String>,
+    pub ctrl_interface: Option<String>,
+}
+
+pub const WPA_CONF_PATH: &str = "/data/rayhunter/wpa_sta.conf";
+
+pub(crate) const WPA_BIN: &str = "/data/rayhunter/bin/wpa_supplicant";
+pub(crate) const UDHCPC_HOOK: &str = "/data/rayhunter/udhcpc-hook.sh";
+pub(crate) const DHCP_LEASE_FILE: &str = "/data/rayhunter/dhcp_lease";
+pub(crate) const DEFAULT_DNS: &[&str] = &["9.9.9.9", "149.112.112.112"];
+pub(crate) const CRASH_LOG_DIR: &str = "/data/rayhunter/crash-logs";
+pub(crate) const MAX_RECOVERY_ATTEMPTS: u32 = 5;
+pub(crate) const BASE_BACKOFF_SECS: u64 = 30;
+pub(crate) const HOSTAPD_CONF: &str = "/data/misc/wifi/hostapd.conf";
+pub(crate) const WAKELOCK_NAME: &[u8] = b"rayhunter";
+pub(crate) const AP_IFACE: &str = "wlan0";
+pub const STA_IFACE: &str = "wlan1";
+pub(crate) const IW_BIN: &str = "/data/rayhunter/bin/iw";
+
+pub(crate) fn iw_path() -> &'static str {
+    if Path::new(IW_BIN).exists() {
+        IW_BIN
+    } else {
+        "iw"
+    }
+}
+
+const BRIDGE_CANDIDATES: &[&str] = &["bridge0", "br0"];
+
+pub fn detect_bridge_iface() -> &'static str {
+    for name in BRIDGE_CANDIDATES {
+        if Path::new(&format!("/sys/class/net/{name}")).exists() {
+            return name;
+        }
+    }
+    BRIDGE_CANDIDATES[0]
+}
+
+#[derive(Clone, Copy, PartialEq, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum WifiState {
+    #[default]
+    Disabled,
+    Connecting,
+    Connected,
+    Failed,
+    Recovering,
+    DataPathDead,
+}
+
+#[derive(Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WifiStatus {
+    pub state: WifiState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tx_packets: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_iw_scan_basic() {
+        let output = "\
+BSS aa:bb:cc:dd:ee:ff(on wlan1)
+\tTSF: 12345 usec
+\tfreq: 2412
+\tsignal: -45.00 dBm
+\tSSID: MyNetwork
+\tRSN:\t * Version: 1
+BSS 11:22:33:44:55:66(on wlan1)
+\tsignal: -72.00 dBm
+\tSSID: OtherNet
+\tWPA:\t * Version: 1
+";
+        let networks = parse_iw_scan(output);
+        assert_eq!(networks.len(), 2);
+        assert_eq!(networks[0].ssid, "MyNetwork");
+        assert_eq!(networks[0].signal_dbm, -45);
+        assert_eq!(networks[0].security, "WPA2");
+        assert_eq!(networks[1].ssid, "OtherNet");
+        assert_eq!(networks[1].signal_dbm, -72);
+        assert_eq!(networks[1].security, "WPA");
+    }
+
+    #[test]
+    fn test_parse_iw_scan_dedup_keeps_strongest() {
+        let output = "\
+BSS aa:bb:cc:dd:ee:ff(on wlan1)
+\tsignal: -80.00 dBm
+\tSSID: DupNet
+\tRSN:\t * Version: 1
+BSS 11:22:33:44:55:66(on wlan1)
+\tsignal: -50.00 dBm
+\tSSID: DupNet
+\tRSN:\t * Version: 1
+";
+        let networks = parse_iw_scan(output);
+        assert_eq!(networks.len(), 1);
+        assert_eq!(networks[0].ssid, "DupNet");
+        assert_eq!(networks[0].signal_dbm, -50);
+    }
+
+    #[test]
+    fn test_parse_iw_scan_hidden_ssid_filtered() {
+        let output = "\
+BSS aa:bb:cc:dd:ee:ff(on wlan1)
+\tsignal: -45.00 dBm
+\tSSID:
+";
+        let networks = parse_iw_scan(output);
+        assert_eq!(networks.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_iw_scan_open_network() {
+        let output = "\
+BSS aa:bb:cc:dd:ee:ff(on wlan1)
+\tsignal: -60.00 dBm
+\tSSID: OpenCafe
+";
+        let networks = parse_iw_scan(output);
+        assert_eq!(networks.len(), 1);
+        assert_eq!(networks[0].security, "Open");
+    }
+
+    #[tokio::test]
+    async fn test_update_wpa_conf_writes_and_removes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wpa_sta.conf");
+        let path_str = path.to_str().unwrap();
+
+        let mut config = WifiConfig::default();
+        config.wifi_ssid = Some("TestNet".to_string());
+        config.wifi_password = Some("pass123".to_string());
+
+        update_wpa_conf_at(&config, path_str).await;
+
+        let content = tokio::fs::read_to_string(&path).await.unwrap();
+        assert!(content.contains("ssid=\"TestNet\""));
+        assert!(content.contains("psk=\"pass123\""));
+
+        config.wifi_ssid = None;
+        config.wifi_password = None;
+        update_wpa_conf_at(&config, path_str).await;
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_update_wpa_conf_ssid_without_password_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wpa_sta.conf");
+        let path_str = path.to_str().unwrap();
+
+        let mut config = WifiConfig::default();
+        config.wifi_ssid = Some("TestNet".to_string());
+        config.wifi_password = None;
+
+        update_wpa_conf_at(&config, path_str).await;
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_parse_default_route() {
+        let (gw, dev) = parse_default_route("default via 192.168.1.1 dev bridge0").unwrap();
+        assert_eq!(gw, "192.168.1.1");
+        assert_eq!(dev, "bridge0");
+
+        let (gw, dev) =
+            parse_default_route("default via 10.0.0.1 dev rmnet_data0 metric 100").unwrap();
+        assert_eq!(gw, "10.0.0.1");
+        assert_eq!(dev, "rmnet_data0");
+
+        assert!(parse_default_route("default dev bridge0 scope link").is_none());
+        assert!(parse_default_route("").is_none());
+    }
+
+    #[test]
+    fn test_format_wpa_conf_basic() {
+        let conf = format_wpa_conf("MyNetwork", "mypassword", None);
+        assert!(conf.contains("ssid=\"MyNetwork\""));
+        assert!(conf.contains("psk=\"mypassword\""));
+        assert!(conf.contains("key_mgmt=WPA-PSK"));
+        assert!(conf.starts_with("ctrl_interface=/var/run/wpa_supplicant\n"));
+    }
+
+    #[test]
+    fn test_format_wpa_conf_escapes_quotes() {
+        let conf = format_wpa_conf("My\"Net", "pass\"word", None);
+        assert!(conf.contains("ssid=\"My\\\"Net\""));
+        assert!(conf.contains("psk=\"pass\\\"word\""));
+    }
+
+    #[test]
+    fn test_format_wpa_conf_escapes_backslashes() {
+        let conf = format_wpa_conf("Net\\work", "pass\\word", None);
+        assert!(conf.contains("ssid=\"Net\\\\work\""));
+        assert!(conf.contains("psk=\"pass\\\\word\""));
+    }
+
+    #[test]
+    fn test_format_wpa_conf_strips_newlines() {
+        let conf = format_wpa_conf("legit", "pass\n}\nnetwork={\n    ssid=\"evil\"", None);
+        assert_eq!(
+            conf.lines().count(),
+            format_wpa_conf("legit", "clean", None).lines().count(),
+            "newlines in password must not inject extra config lines"
+        );
+    }
+
+    #[test]
+    fn test_read_ssid_from_wpa_conf() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wpa.conf");
+        let conf = format_wpa_conf("TestSSID", "password123", None);
+        std::fs::write(&path, conf).unwrap();
+
+        let ssid = read_ssid_from_wpa_conf(path.to_str().unwrap());
+        assert_eq!(ssid, Some("TestSSID".to_string()));
+    }
+
+    #[test]
+    fn test_read_ssid_roundtrips_special_chars() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wpa.conf");
+        let conf = format_wpa_conf("My\"Net\\work", "pass", None);
+        std::fs::write(&path, conf).unwrap();
+
+        let ssid = read_ssid_from_wpa_conf(path.to_str().unwrap());
+        assert_eq!(ssid, Some("My\"Net\\work".to_string()));
+    }
+
+    #[test]
+    fn test_read_ssid_missing_file() {
+        assert_eq!(read_ssid_from_wpa_conf("/nonexistent/path"), None);
+    }
+}

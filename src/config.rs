@@ -1,9 +1,13 @@
 use log::warn;
 
-use crate::{WPA_CONF_PATH, WifiConfig};
+use crate::{DEFAULT_WPA_CONF_PATH, WifiConfig};
 
 pub async fn update_wpa_conf(config: &WifiConfig) {
-    update_wpa_conf_at(config, WPA_CONF_PATH).await;
+    let path = config
+        .wpa_conf_path
+        .as_deref()
+        .unwrap_or(DEFAULT_WPA_CONF_PATH);
+    update_wpa_conf_at(config, path).await;
 }
 
 pub(crate) async fn update_wpa_conf_at(config: &WifiConfig, path: &str) {

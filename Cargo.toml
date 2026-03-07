@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.88.0"
 description = "Async WiFi station (STA) lifecycle manager for embedded Linux"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/EFForg/rayhunter"
+repository = "https://github.com/BeigeBox/wifi-station"
 keywords = ["wifi", "embedded", "linux", "wpa-supplicant", "networking"]
 categories = ["network-programming"]
 

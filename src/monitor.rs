@@ -16,8 +16,8 @@ use crate::recovery::{
     start_hostapd_and_bridge,
 };
 use crate::{
-    BASE_BACKOFF_SECS, DEFAULT_DNS, MAX_RECOVERY_ATTEMPTS, STA_IFACE, WPA_CONF_PATH, WifiConfig,
-    WifiState, WifiStatus,
+    BASE_BACKOFF_SECS, DEFAULT_DNS, DEFAULT_WAKELOCK_NAME, DEFAULT_WPA_CONF_PATH,
+    MAX_RECOVERY_ATTEMPTS, STA_IFACE, WifiConfig, WifiState, WifiStatus,
 };
 
 pub fn run_wifi_client(
@@ -26,7 +26,11 @@ pub fn run_wifi_client(
     shutdown_token: CancellationToken,
     wifi_status: Arc<RwLock<WifiStatus>>,
 ) {
-    if !config.wifi_enabled || !Path::new(WPA_CONF_PATH).exists() {
+    let wpa_conf_path = config
+        .wpa_conf_path
+        .as_deref()
+        .unwrap_or(DEFAULT_WPA_CONF_PATH);
+    if !config.wifi_enabled || !Path::new(wpa_conf_path).exists() {
         return;
     }
 
@@ -36,7 +40,7 @@ pub fn run_wifi_client(
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| DEFAULT_DNS.iter().map(|s| s.to_string()).collect());
 
-    let ssid = read_ssid_from_wpa_conf(WPA_CONF_PATH);
+    let ssid = read_ssid_from_wpa_conf(wpa_conf_path);
     let config = config.clone();
 
     task_tracker.spawn(async move {
@@ -46,7 +50,11 @@ pub fn run_wifi_client(
             status.ssid = ssid.clone();
         }
 
-        let _wakelock = WakelockGuard::acquire().await;
+        let wakelock_name = config
+            .wakelock_name
+            .as_deref()
+            .unwrap_or(DEFAULT_WAKELOCK_NAME);
+        let _wakelock = WakelockGuard::acquire(wakelock_name).await;
 
         let mut client = WifiClient::new(dns_servers, &config);
         let mut attempt = 0u32;
@@ -76,7 +84,7 @@ pub fn run_wifi_client(
                     let is_scan_eio = format!("{e}").contains("-EIO");
                     if is_scan_eio && !tried_module_reload {
                         info!("scan failed with -EIO, reloading wifi module (will start STA before AP)");
-                        match reload_wifi_module_sta_first().await {
+                        match reload_wifi_module_sta_first(&client.iw_bin).await {
                             Ok(()) => {
                                 tried_module_reload = true;
                                 continue;
@@ -153,14 +161,14 @@ pub fn run_wifi_client(
                         }
 
                         if recovery_attempts == 1
-                            && let Err(e) = save_wifi_diagnostics("interface disappeared").await
+                            && let Err(e) = save_wifi_diagnostics(&client.crash_log_dir, "interface disappeared").await
                         {
                             warn!("failed to save wifi diagnostics: {e}");
                         }
 
                         client.stop().await;
 
-                        if let Err(e) = reload_wifi_module(&client.hostapd_conf).await {
+                        if let Err(e) = reload_wifi_module(&client.hostapd_conf, &client.iw_bin).await {
                             error!("module reload failed: {e}");
                             let mut status = wifi_status.write().await;
                             status.state = WifiState::Recovering;
@@ -239,7 +247,7 @@ pub fn run_wifi_client(
                                 let mut status = wifi_status.write().await;
                                 status.state = WifiState::DataPathDead;
                             }
-                            if let Err(e) = save_wifi_diagnostics("TX+RX data path stall").await {
+                            if let Err(e) = save_wifi_diagnostics(&client.crash_log_dir, "TX+RX data path stall").await {
                                 warn!("failed to save wifi diagnostics: {e}");
                             }
                             if attempt_data_path_recovery(&mut client, &wifi_status, &shutdown_token).await {
@@ -265,7 +273,7 @@ pub fn run_wifi_client(
                                 }
                                 warn!("module reload attempt {recovery_attempts}/{MAX_RECOVERY_ATTEMPTS}");
                                 client.stop().await;
-                                if let Err(e) = reload_wifi_module(&client.hostapd_conf).await {
+                                if let Err(e) = reload_wifi_module(&client.hostapd_conf, &client.iw_bin).await {
                                     error!("module reload failed: {e}");
                                     let mut status = wifi_status.write().await;
                                     status.state = WifiState::Recovering;

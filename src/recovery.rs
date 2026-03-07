@@ -10,7 +10,7 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 use crate::client::WifiClient;
-use crate::{AP_IFACE, STA_IFACE, WifiState, WifiStatus, detect_bridge_iface, iw_path};
+use crate::{AP_IFACE, STA_IFACE, WifiState, WifiStatus, detect_bridge_iface};
 
 async fn get_module_path() -> Result<String> {
     let out = Command::new("uname").arg("-r").output().await?;
@@ -26,9 +26,8 @@ async fn get_module_path() -> Result<String> {
     bail!("wlan.ko not found for kernel {kver}");
 }
 
-async fn create_sta_with_iw() -> Result<()> {
-    let iw = iw_path();
-    let out = Command::new(iw)
+async fn create_sta_with_iw(iw_bin: &str) -> Result<()> {
+    let out = Command::new(iw_bin)
         .args([
             "dev",
             AP_IFACE,
@@ -46,7 +45,7 @@ async fn create_sta_with_iw() -> Result<()> {
         return Ok(());
     }
     info!("direct managed creation failed, trying P2P_CLIENT workaround");
-    let out = Command::new(iw)
+    let out = Command::new(iw_bin)
         .args([
             "dev",
             AP_IFACE,
@@ -64,7 +63,7 @@ async fn create_sta_with_iw() -> Result<()> {
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
-    let out = Command::new(iw)
+    let out = Command::new(iw_bin)
         .args(["dev", STA_IFACE, "set", "type", "managed"])
         .output()
         .await?;
@@ -109,10 +108,10 @@ async fn teardown_and_reload_module() -> Result<()> {
     bail!("{AP_IFACE} did not appear after insmod");
 }
 
-pub(crate) async fn reload_wifi_module(hostapd_conf: &str) -> Result<()> {
+pub(crate) async fn reload_wifi_module(hostapd_conf: &str, iw_bin: &str) -> Result<()> {
     teardown_and_reload_module().await?;
     start_hostapd_and_bridge(hostapd_conf).await;
-    create_sta_with_iw().await?;
+    create_sta_with_iw(iw_bin).await?;
     info!("WiFi module reloaded and AP restored");
     Ok(())
 }
@@ -128,9 +127,9 @@ pub(crate) async fn reload_wifi_module(hostapd_conf: &str) -> Result<()> {
 /// Killing hostapd directly doesn't work because Android's netd daemon detects
 /// the death and tears down the entire wifi stack (rmmod + insmod + hostapd
 /// restart). Doing our own module reload preempts netd's lifecycle management.
-pub(crate) async fn reload_wifi_module_sta_first() -> Result<()> {
+pub(crate) async fn reload_wifi_module_sta_first(iw_bin: &str) -> Result<()> {
     teardown_and_reload_module().await?;
-    create_sta_with_iw().await?;
+    create_sta_with_iw(iw_bin).await?;
     Ok(())
 }
 

@@ -7,8 +7,9 @@ use tokio::process::{Child, Command};
 use tokio::time::sleep;
 
 use crate::{
-    DHCP_LEASE_FILE, HOSTAPD_CONF, STA_IFACE, UDHCPC_HOOK, WPA_BIN, WPA_CONF_PATH, WifiConfig,
-    iw_path,
+    DEFAULT_CRASH_LOG_DIR, DEFAULT_DHCP_LEASE_PATH, DEFAULT_IW_BIN, DEFAULT_UDHCPC_HOOK_PATH,
+    DEFAULT_WPA_BIN, DEFAULT_WPA_CONF_PATH, HOSTAPD_CONF, STA_IFACE, UDHCPC_HOOK_SCRIPT,
+    WifiConfig,
 };
 
 pub(crate) const TX_STALL_THRESHOLD: u32 = 3;
@@ -25,6 +26,11 @@ pub(crate) struct WifiClient {
     pub(crate) last_tx_packets: Option<u64>,
     pub(crate) last_rx_packets: Option<u64>,
     pub(crate) tx_stall_count: u32,
+    pub(crate) udhcpc_hook_path: String,
+    pub(crate) dhcp_lease_path: String,
+    pub(crate) wpa_conf_path: String,
+    pub(crate) iw_bin: String,
+    pub(crate) crash_log_dir: String,
 }
 
 impl WifiClient {
@@ -34,7 +40,7 @@ impl WifiClient {
             wpa_bin: config
                 .wpa_supplicant_bin
                 .clone()
-                .unwrap_or_else(|| WPA_BIN.to_string()),
+                .unwrap_or_else(|| DEFAULT_WPA_BIN.to_string()),
             hostapd_conf: config
                 .hostapd_conf
                 .clone()
@@ -47,6 +53,26 @@ impl WifiClient {
             last_tx_packets: None,
             last_rx_packets: None,
             tx_stall_count: 0,
+            udhcpc_hook_path: config
+                .udhcpc_hook_path
+                .clone()
+                .unwrap_or_else(|| DEFAULT_UDHCPC_HOOK_PATH.to_string()),
+            dhcp_lease_path: config
+                .dhcp_lease_path
+                .clone()
+                .unwrap_or_else(|| DEFAULT_DHCP_LEASE_PATH.to_string()),
+            wpa_conf_path: config
+                .wpa_conf_path
+                .clone()
+                .unwrap_or_else(|| DEFAULT_WPA_CONF_PATH.to_string()),
+            iw_bin: config
+                .iw_bin
+                .clone()
+                .unwrap_or_else(|| DEFAULT_IW_BIN.to_string()),
+            crash_log_dir: config
+                .crash_log_dir
+                .clone()
+                .unwrap_or_else(|| DEFAULT_CRASH_LOG_DIR.to_string()),
         }
     }
 
@@ -79,8 +105,7 @@ impl WifiClient {
     }
 
     async fn create_sta_interface(&self) -> Result<()> {
-        let iw = iw_path();
-        let out = Command::new(iw)
+        let out = Command::new(&self.iw_bin)
             .args([
                 "dev",
                 crate::AP_IFACE,
@@ -98,7 +123,7 @@ impl WifiClient {
             return Ok(());
         }
         info!("direct managed creation failed, trying P2P_CLIENT workaround");
-        let out = Command::new(iw)
+        let out = Command::new(&self.iw_bin)
             .args([
                 "dev",
                 crate::AP_IFACE,
@@ -117,7 +142,7 @@ impl WifiClient {
                 String::from_utf8_lossy(&out.stderr).trim()
             );
         }
-        let out = Command::new(iw)
+        let out = Command::new(&self.iw_bin)
             .args(["dev", &self.iface, "set", "type", "managed"])
             .output()
             .await?;
@@ -146,7 +171,7 @@ impl WifiClient {
     }
 
     async fn set_managed_mode(&self) -> Result<()> {
-        let out = Command::new(iw_path())
+        let out = Command::new(&self.iw_bin)
             .args(["dev", &self.iface, "set", "type", "managed"])
             .output()
             .await?;
@@ -172,7 +197,7 @@ impl WifiClient {
     pub(crate) async fn start_wpa_supplicant(&mut self) -> Result<()> {
         use std::process::Stdio;
         let child = Command::new(&self.wpa_bin)
-            .args(["-i", &self.iface, "-Dnl80211", "-c", WPA_CONF_PATH])
+            .args(["-i", &self.iface, "-Dnl80211", "-c", &self.wpa_conf_path])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()?;
@@ -185,7 +210,7 @@ impl WifiClient {
             let _ = child.kill().await;
         }
 
-        if let Ok(out) = Command::new(iw_path())
+        if let Ok(out) = Command::new(&self.iw_bin)
             .args(["dev", &self.iface, "scan"])
             .output()
             .await
@@ -214,14 +239,25 @@ impl WifiClient {
     }
 
     pub(crate) async fn start_dhcp(&mut self) -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
         use std::process::Stdio;
-        let _ = tokio::fs::remove_file(DHCP_LEASE_FILE).await;
+
+        let _ = tokio::fs::remove_file(&self.dhcp_lease_path).await;
+
+        let script = UDHCPC_HOOK_SCRIPT.replacen("{}", &self.dhcp_lease_path, 1);
+        tokio::fs::write(&self.udhcpc_hook_path, &script).await?;
+        tokio::fs::set_permissions(
+            &self.udhcpc_hook_path,
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .await?;
+
         let child = Command::new("udhcpc")
             .args([
                 "-i",
                 &self.iface,
                 "-s",
-                UDHCPC_HOOK,
+                &self.udhcpc_hook_path,
                 "-t",
                 "10",
                 "-A",
@@ -235,7 +271,7 @@ impl WifiClient {
 
         for _ in 0..30 {
             sleep(Duration::from_secs(1)).await;
-            if tokio::fs::metadata(DHCP_LEASE_FILE).await.is_ok() {
+            if tokio::fs::metadata(&self.dhcp_lease_path).await.is_ok() {
                 return Ok(());
             }
         }

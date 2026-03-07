@@ -30,30 +30,44 @@ pub struct WifiConfig {
     pub wpa_supplicant_bin: Option<String>,
     pub hostapd_conf: Option<String>,
     pub ctrl_interface: Option<String>,
+    pub udhcpc_hook_path: Option<String>,
+    pub dhcp_lease_path: Option<String>,
+    pub wpa_conf_path: Option<String>,
+    pub iw_bin: Option<String>,
+    pub crash_log_dir: Option<String>,
+    pub wakelock_name: Option<String>,
 }
 
-pub const WPA_CONF_PATH: &str = "/data/rayhunter/wpa_sta.conf";
+pub(crate) const DEFAULT_WPA_CONF_PATH: &str = "/etc/wpa_supplicant/wpa_sta.conf";
+pub(crate) const DEFAULT_WPA_BIN: &str = "wpa_supplicant";
+pub(crate) const DEFAULT_IW_BIN: &str = "iw";
+pub(crate) const DEFAULT_UDHCPC_HOOK_PATH: &str = "/tmp/wifi-station-udhcpc-hook.sh";
+pub(crate) const DEFAULT_DHCP_LEASE_PATH: &str = "/tmp/wifi-station-dhcp-lease";
+pub(crate) const DEFAULT_CRASH_LOG_DIR: &str = "/tmp/wifi-station-crash-logs";
+pub(crate) const DEFAULT_WAKELOCK_NAME: &str = "wifi-station";
 
-pub(crate) const WPA_BIN: &str = "/data/rayhunter/bin/wpa_supplicant";
-pub(crate) const UDHCPC_HOOK: &str = "/data/rayhunter/udhcpc-hook.sh";
-pub(crate) const DHCP_LEASE_FILE: &str = "/data/rayhunter/dhcp_lease";
+pub(crate) const UDHCPC_HOOK_SCRIPT: &str = r#"#!/bin/sh
+LEASE_FILE="{}"
+
+case "$1" in
+    bound|renew)
+        ip addr flush dev "$interface"
+        ip addr add "$ip/$mask" dev "$interface"
+        echo "gateway=$router" > "$LEASE_FILE"
+        echo "dns=$dns" >> "$LEASE_FILE"
+        ;;
+    deconfig)
+        ip addr flush dev "$interface"
+        rm -f "$LEASE_FILE"
+        ;;
+esac
+"#;
 pub(crate) const DEFAULT_DNS: &[&str] = &["9.9.9.9", "149.112.112.112"];
-pub(crate) const CRASH_LOG_DIR: &str = "/data/rayhunter/crash-logs";
 pub(crate) const MAX_RECOVERY_ATTEMPTS: u32 = 5;
 pub(crate) const BASE_BACKOFF_SECS: u64 = 30;
 pub(crate) const HOSTAPD_CONF: &str = "/data/misc/wifi/hostapd.conf";
-pub(crate) const WAKELOCK_NAME: &[u8] = b"rayhunter";
 pub(crate) const AP_IFACE: &str = "wlan0";
 pub const STA_IFACE: &str = "wlan1";
-pub(crate) const IW_BIN: &str = "/data/rayhunter/bin/iw";
-
-pub(crate) fn iw_path() -> &'static str {
-    if Path::new(IW_BIN).exists() {
-        IW_BIN
-    } else {
-        "iw"
-    }
-}
 
 const BRIDGE_CANDIDATES: &[&str] = &["bridge0", "br0"];
 

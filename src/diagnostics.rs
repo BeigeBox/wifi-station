@@ -2,33 +2,36 @@ use anyhow::Result;
 use log::{info, warn};
 use tokio::process::Command;
 
-use crate::{CRASH_LOG_DIR, STA_IFACE, WAKELOCK_NAME};
+use crate::STA_IFACE;
 
-pub(crate) struct WakelockGuard;
+pub(crate) struct WakelockGuard {
+    name: Vec<u8>,
+}
 
 impl WakelockGuard {
-    pub(crate) async fn acquire() -> Self {
-        match tokio::fs::write("/sys/power/wake_lock", WAKELOCK_NAME).await {
+    pub(crate) async fn acquire(name: &str) -> Self {
+        let name_bytes = name.as_bytes().to_vec();
+        match tokio::fs::write("/sys/power/wake_lock", &name_bytes).await {
             Ok(()) => info!("acquired kernel wakelock"),
             Err(e) => warn!("failed to acquire wakelock: {e}"),
         }
-        WakelockGuard
+        WakelockGuard { name: name_bytes }
     }
 }
 
 impl Drop for WakelockGuard {
     fn drop(&mut self) {
-        match std::fs::write("/sys/power/wake_unlock", WAKELOCK_NAME) {
+        match std::fs::write("/sys/power/wake_unlock", &self.name) {
             Ok(()) => info!("released kernel wakelock"),
             Err(e) => warn!("failed to release wakelock: {e}"),
         }
     }
 }
 
-pub(crate) async fn save_wifi_diagnostics(reason: &str) -> Result<()> {
-    tokio::fs::create_dir_all(CRASH_LOG_DIR).await?;
+pub(crate) async fn save_wifi_diagnostics(crash_log_dir: &str, reason: &str) -> Result<()> {
+    tokio::fs::create_dir_all(crash_log_dir).await?;
 
-    if let Ok(mut entries) = tokio::fs::read_dir(CRASH_LOG_DIR).await {
+    if let Ok(mut entries) = tokio::fs::read_dir(crash_log_dir).await {
         let mut files = Vec::new();
         while let Ok(Some(entry)) = entries.next_entry().await {
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -45,7 +48,7 @@ pub(crate) async fn save_wifi_diagnostics(reason: &str) -> Result<()> {
     }
 
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-    let path = format!("{CRASH_LOG_DIR}/wifi-diag-{timestamp}.log");
+    let path = format!("{crash_log_dir}/wifi-diag-{timestamp}.log");
 
     let iface = STA_IFACE;
     let (

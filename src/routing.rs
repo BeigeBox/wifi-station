@@ -4,7 +4,6 @@ use anyhow::{Context, Result, bail};
 use log::{info, warn};
 use tokio::process::Command;
 
-use crate::DHCP_LEASE_FILE;
 use crate::STA_IFACE;
 use crate::client::WifiClient;
 
@@ -90,8 +89,8 @@ pub(crate) async fn restore_cellular_default() {
     }
 }
 
-pub(crate) async fn read_lease_field(field: &str) -> Option<String> {
-    let content = tokio::fs::read_to_string(DHCP_LEASE_FILE).await.ok()?;
+pub(crate) async fn read_lease_field(lease_path: &str, field: &str) -> Option<String> {
+    let content = tokio::fs::read_to_string(lease_path).await.ok()?;
     let prefix = format!("{field}=");
     content.lines().find_map(|line| {
         line.strip_prefix(&prefix)
@@ -189,7 +188,7 @@ impl WifiClient {
         let _ = tokio::fs::write(&arp_path, "1").await;
 
         let mut dns: Vec<String> = Vec::new();
-        if let Some(dhcp_dns) = read_lease_field("dns").await {
+        if let Some(dhcp_dns) = read_lease_field(&self.dhcp_lease_path, "dns").await {
             dns.extend(
                 dhcp_dns
                     .split_whitespace()
@@ -270,7 +269,7 @@ impl WifiClient {
             return Ok(gw);
         }
 
-        if let Some(gw) = read_lease_field("gateway").await {
+        if let Some(gw) = read_lease_field(&self.dhcp_lease_path, "gateway").await {
             info!("using DHCP-provided gateway {gw} from lease file");
             return Ok(gw);
         }
@@ -298,7 +297,7 @@ impl WifiClient {
             .args(["route", "del", "default", "dev", &self.iface])
             .output()
             .await;
-        let _ = tokio::fs::remove_file(DHCP_LEASE_FILE).await;
+        let _ = tokio::fs::remove_file(&self.dhcp_lease_path).await;
     }
 
     pub(crate) async fn allow_inbound(&self) {

@@ -89,9 +89,11 @@ impl WifiClient {
     pub(crate) async fn stop(&mut self) {
         if let Some(mut child) = self.wpa_child.take() {
             let _ = child.kill().await;
+            let _ = child.wait().await;
         }
         if let Some(mut child) = self.dhcp_child.take() {
             let _ = child.kill().await;
+            let _ = child.wait().await;
         }
         self.remove_inbound().await;
         self.cleanup_routing().await;
@@ -196,6 +198,14 @@ impl WifiClient {
 
     pub(crate) async fn start_wpa_supplicant(&mut self) -> Result<()> {
         use std::process::Stdio;
+
+        // Kill any stale wpa_supplicant from a previous daemon run
+        let _ = Command::new("pkill")
+            .args(["-f", &format!("wpa_supplicant.*-i.*{}", self.iface)])
+            .output()
+            .await;
+        sleep(Duration::from_millis(200)).await;
+
         let child = Command::new(&self.wpa_bin)
             .args(["-i", &self.iface, "-Dnl80211", "-c", &self.wpa_conf_path])
             .stdout(Stdio::null())
@@ -208,6 +218,7 @@ impl WifiClient {
 
         if let Some(mut child) = self.wpa_child.take() {
             let _ = child.kill().await;
+            let _ = child.wait().await;
         }
 
         if let Ok(out) = Command::new(&self.iw_bin)

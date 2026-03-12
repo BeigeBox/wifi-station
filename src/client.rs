@@ -199,12 +199,14 @@ impl WifiClient {
     pub(crate) async fn start_wpa_supplicant(&mut self) -> Result<()> {
         use std::process::Stdio;
 
-        // Kill any stale wpa_supplicant from a previous daemon run
-        let _ = Command::new("pkill")
-            .args(["-f", &format!("wpa_supplicant.*-i.*{}", self.iface)])
+        // Kill any stale wpa_supplicant from a previous daemon run.
+        // Use killall instead of pkill -f: older busybox (e.g. Moxee v1.23.2)
+        // silently fails with pkill -f regex patterns.
+        let _ = Command::new("killall")
+            .args(["wpa_supplicant"])
             .output()
             .await;
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_millis(500)).await;
 
         let child = Command::new(&self.wpa_bin)
             .args(["-i", &self.iface, "-Dnl80211", "-c", &self.wpa_conf_path])

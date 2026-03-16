@@ -80,8 +80,10 @@ pub fn detect_bridge_iface() -> &'static str {
     BRIDGE_CANDIDATES[0]
 }
 
+/// Possible wifi client states
 #[derive(Clone, Copy, PartialEq, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum WifiState {
     #[default]
     Disabled,
@@ -92,17 +94,24 @@ pub enum WifiState {
     DataPathDead,
 }
 
+/// The status of the wifi client
 #[derive(Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct WifiStatus {
+    /// The state of the wifi connection
     pub state: WifiState,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Connected SSID
     pub ssid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Connected IP
     pub ip: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// String containing error messages
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Count of packets transmitted
     pub tx_packets: Option<u64>,
 }
 

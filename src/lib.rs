@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 mod client;
 mod config;
@@ -27,6 +27,7 @@ pub struct WifiConfig {
     pub dns_servers: Option<Vec<String>>,
     pub wifi_ssid: Option<String>,
     pub wifi_password: Option<String>,
+    pub security_type: Option<SecurityType>,
     pub wpa_supplicant_bin: Option<String>,
     pub hostapd_conf: Option<String>,
     pub ctrl_interface: Option<String>,
@@ -36,6 +37,14 @@ pub struct WifiConfig {
     pub iw_bin: Option<String>,
     pub crash_log_dir: Option<String>,
     pub wakelock_name: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityType {
+    #[default]
+    WpaPsk,
+    Sae,
 }
 
 pub(crate) const DEFAULT_WPA_CONF_PATH: &str = "/etc/wpa_supplicant/wpa_sta.conf";

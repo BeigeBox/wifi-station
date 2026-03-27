@@ -193,6 +193,86 @@ BSS aa:bb:cc:dd:ee:ff(on wlan1)
         assert_eq!(networks[0].security, "Open");
     }
 
+    #[test]
+    fn test_parse_iw_scan_wpa3_only() {
+        let output = "\
+BSS aa:bb:cc:dd:ee:ff(on wlan1)
+\tsignal: -45.00 dBm
+\tSSID: WPA3Net
+\tRSN:\t * Version: 1
+\t\t * Group cipher: CCMP
+\t\t * Pairwise ciphers: CCMP
+\t\t * Authentication suites: SAE
+\t\t * Capabilities: MFP-required
+";
+        let networks = parse_iw_scan(output);
+        assert_eq!(networks.len(), 1);
+        assert_eq!(networks[0].security, "WPA3");
+    }
+
+    #[test]
+    fn test_parse_iw_scan_wpa3_transition() {
+        let output = "\
+BSS aa:bb:cc:dd:ee:ff(on wlan1)
+\tsignal: -50.00 dBm
+\tSSID: TransitionNet
+\tRSN:\t * Version: 1
+\t\t * Group cipher: CCMP
+\t\t * Pairwise ciphers: CCMP
+\t\t * Authentication suites: PSK SAE
+";
+        let networks = parse_iw_scan(output);
+        assert_eq!(networks.len(), 1);
+        assert_eq!(networks[0].security, "WPA3 (transition)");
+    }
+
+    #[test]
+    fn test_parse_iw_scan_wpa2_explicit_psk() {
+        let output = "\
+BSS aa:bb:cc:dd:ee:ff(on wlan1)
+\tsignal: -55.00 dBm
+\tSSID: WPA2Net
+\tRSN:\t * Version: 1
+\t\t * Group cipher: CCMP
+\t\t * Pairwise ciphers: CCMP
+\t\t * Authentication suites: PSK
+";
+        let networks = parse_iw_scan(output);
+        assert_eq!(networks.len(), 1);
+        assert_eq!(networks[0].security, "WPA2");
+    }
+
+    #[test]
+    fn test_parse_iw_scan_mixed_networks() {
+        let output = "\
+BSS aa:bb:cc:dd:ee:ff(on wlan1)
+\tsignal: -40.00 dBm
+\tSSID: SecureWPA3
+\tRSN:\t * Version: 1
+\t\t * Group cipher: CCMP
+\t\t * Pairwise ciphers: CCMP
+\t\t * Authentication suites: SAE
+BSS 11:22:33:44:55:66(on wlan1)
+\tsignal: -60.00 dBm
+\tSSID: ClassicWPA2
+\tRSN:\t * Version: 1
+\t\t * Group cipher: CCMP
+\t\t * Pairwise ciphers: CCMP
+\t\t * Authentication suites: PSK
+BSS 77:88:99:aa:bb:cc(on wlan1)
+\tsignal: -70.00 dBm
+\tSSID: OpenCafe
+";
+        let networks = parse_iw_scan(output);
+        assert_eq!(networks.len(), 3);
+        let wpa3 = networks.iter().find(|n| n.ssid == "SecureWPA3").unwrap();
+        assert_eq!(wpa3.security, "WPA3");
+        let wpa2 = networks.iter().find(|n| n.ssid == "ClassicWPA2").unwrap();
+        assert_eq!(wpa2.security, "WPA2");
+        let open = networks.iter().find(|n| n.ssid == "OpenCafe").unwrap();
+        assert_eq!(open.security, "Open");
+    }
+
     #[tokio::test]
     async fn test_update_wpa_conf_writes_and_removes() {
         let dir = tempfile::tempdir().unwrap();

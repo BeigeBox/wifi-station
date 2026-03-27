@@ -1,6 +1,6 @@
 use log::warn;
 
-use crate::{DEFAULT_WPA_CONF_PATH, WifiConfig};
+use crate::{DEFAULT_WPA_CONF_PATH, SecurityType, WifiConfig};
 
 pub async fn update_wpa_conf(config: &WifiConfig) {
     let path = config
@@ -21,10 +21,12 @@ pub(crate) async fn update_wpa_conf_at(config: &WifiConfig, path: &str) {
         .is_some_and(|s| !s.trim().is_empty());
 
     if has_ssid && has_password {
+        let security_type = config.security_type.unwrap_or_default();
         let conf = format_wpa_conf(
             config.wifi_ssid.as_ref().unwrap(),
             config.wifi_password.as_ref().unwrap(),
             config.ctrl_interface.as_deref(),
+            security_type,
         );
         if let Err(e) = tokio::fs::write(path, conf).await {
             warn!("failed to write wpa_supplicant config: {e}");
@@ -50,13 +52,23 @@ fn escape_wpa_value(s: &str) -> String {
 /// Generate a wpa_supplicant configuration file from an SSID and password.
 /// Escapes backslashes and double quotes, strips newlines from both fields.
 /// `ctrl_interface` overrides the default `/var/run/wpa_supplicant` path.
-pub fn format_wpa_conf(ssid: &str, password: &str, ctrl_interface: Option<&str>) -> String {
+pub fn format_wpa_conf(
+    ssid: &str,
+    password: &str,
+    ctrl_interface: Option<&str>,
+    security_type: SecurityType,
+) -> String {
     let ssid = escape_wpa_value(ssid);
     let password = escape_wpa_value(password);
     let ctrl = ctrl_interface.unwrap_or("/var/run/wpa_supplicant");
-    format!(
-        "ctrl_interface={ctrl}\nnetwork={{\n    ssid=\"{ssid}\"\n    psk=\"{password}\"\n    key_mgmt=WPA-PSK\n}}\n"
-    )
+    match security_type {
+        SecurityType::WpaPsk => format!(
+            "ctrl_interface={ctrl}\nnetwork={{\n    ssid=\"{ssid}\"\n    psk=\"{password}\"\n    key_mgmt=WPA-PSK\n}}\n"
+        ),
+        SecurityType::Sae => format!(
+            "ctrl_interface={ctrl}\nnetwork={{\n    ssid=\"{ssid}\"\n    sae_password=\"{password}\"\n    key_mgmt=SAE\n    ieee80211w=2\n}}\n"
+        ),
+    }
 }
 
 /// Read the SSID from a wpa_supplicant configuration file.

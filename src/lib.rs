@@ -326,7 +326,7 @@ BSS 77:88:99:aa:bb:cc(on wlan1)
 
     #[test]
     fn test_format_wpa_conf_basic() {
-        let conf = format_wpa_conf("MyNetwork", "mypassword", None);
+        let conf = format_wpa_conf("MyNetwork", "mypassword", None, SecurityType::WpaPsk);
         assert!(conf.contains("ssid=\"MyNetwork\""));
         assert!(conf.contains("psk=\"mypassword\""));
         assert!(conf.contains("key_mgmt=WPA-PSK"));
@@ -335,33 +335,55 @@ BSS 77:88:99:aa:bb:cc(on wlan1)
 
     #[test]
     fn test_format_wpa_conf_escapes_quotes() {
-        let conf = format_wpa_conf("My\"Net", "pass\"word", None);
+        let conf = format_wpa_conf("My\"Net", "pass\"word", None, SecurityType::WpaPsk);
         assert!(conf.contains("ssid=\"My\\\"Net\""));
         assert!(conf.contains("psk=\"pass\\\"word\""));
     }
 
     #[test]
     fn test_format_wpa_conf_escapes_backslashes() {
-        let conf = format_wpa_conf("Net\\work", "pass\\word", None);
+        let conf = format_wpa_conf("Net\\work", "pass\\word", None, SecurityType::WpaPsk);
         assert!(conf.contains("ssid=\"Net\\\\work\""));
         assert!(conf.contains("psk=\"pass\\\\word\""));
     }
 
     #[test]
     fn test_format_wpa_conf_strips_newlines() {
-        let conf = format_wpa_conf("legit", "pass\n}\nnetwork={\n    ssid=\"evil\"", None);
+        let conf = format_wpa_conf(
+            "legit",
+            "pass\n}\nnetwork={\n    ssid=\"evil\"",
+            None,
+            SecurityType::WpaPsk,
+        );
         assert_eq!(
             conf.lines().count(),
-            format_wpa_conf("legit", "clean", None).lines().count(),
+            format_wpa_conf("legit", "clean", None, SecurityType::WpaPsk)
+                .lines()
+                .count(),
             "newlines in password must not inject extra config lines"
         );
+    }
+
+    #[test]
+    fn test_format_wpa_conf_sae() {
+        let conf = format_wpa_conf("SAENet", "saepass", None, SecurityType::Sae);
+        assert!(conf.contains("key_mgmt=SAE"));
+        assert!(conf.contains("ieee80211w=2"));
+        assert!(conf.contains("sae_password=\"saepass\""));
+        assert!(!conf.contains("psk="));
+    }
+
+    #[test]
+    fn test_format_wpa_conf_sae_escapes() {
+        let conf = format_wpa_conf("SAENet", "pass\"w\\ord", None, SecurityType::Sae);
+        assert!(conf.contains("sae_password=\"pass\\\"w\\\\ord\""));
     }
 
     #[test]
     fn test_read_ssid_from_wpa_conf() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("wpa.conf");
-        let conf = format_wpa_conf("TestSSID", "password123", None);
+        let conf = format_wpa_conf("TestSSID", "password123", None, SecurityType::WpaPsk);
         std::fs::write(&path, conf).unwrap();
 
         let ssid = read_ssid_from_wpa_conf(path.to_str().unwrap());
@@ -372,7 +394,7 @@ BSS 77:88:99:aa:bb:cc(on wlan1)
     fn test_read_ssid_roundtrips_special_chars() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("wpa.conf");
-        let conf = format_wpa_conf("My\"Net\\work", "pass", None);
+        let conf = format_wpa_conf("My\"Net\\work", "pass", None, SecurityType::WpaPsk);
         std::fs::write(&path, conf).unwrap();
 
         let ssid = read_ssid_from_wpa_conf(path.to_str().unwrap());

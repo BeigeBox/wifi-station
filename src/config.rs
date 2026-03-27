@@ -71,15 +71,29 @@ pub fn format_wpa_conf(
     }
 }
 
+/// Read the SSID and security type from a wpa_supplicant configuration file.
+/// Returns None if the file doesn't exist or has no ssid line.
+pub fn read_network_from_wpa_conf(path: &str) -> Option<(String, SecurityType)> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut ssid = None;
+    let mut security = SecurityType::WpaPsk;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(s) = trimmed
+            .strip_prefix("ssid=\"")
+            .and_then(|s| s.strip_suffix('"'))
+        {
+            ssid = Some(s.replace("\\\"", "\"").replace("\\\\", "\\"));
+        }
+        if trimmed.contains("key_mgmt=SAE") {
+            security = SecurityType::Sae;
+        }
+    }
+    Some((ssid?, security))
+}
+
 /// Read the SSID from a wpa_supplicant configuration file.
 /// Returns None if the file doesn't exist or has no ssid line.
 pub fn read_ssid_from_wpa_conf(path: &str) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
-    content.lines().find_map(|line| {
-        let trimmed = line.trim();
-        trimmed
-            .strip_prefix("ssid=\"")
-            .and_then(|s| s.strip_suffix('"'))
-            .map(|s| s.replace("\\\"", "\"").replace("\\\\", "\\"))
-    })
+    read_network_from_wpa_conf(path).map(|(ssid, _)| ssid)
 }

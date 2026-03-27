@@ -10,7 +10,9 @@ mod recovery;
 mod routing;
 mod scan;
 
-pub use config::{format_wpa_conf, read_ssid_from_wpa_conf, update_wpa_conf};
+pub use config::{
+    format_wpa_conf, read_network_from_wpa_conf, read_ssid_from_wpa_conf, update_wpa_conf,
+};
 pub use monitor::run_wifi_client;
 pub use scan::{WifiNetwork, scan_wifi_networks};
 
@@ -399,6 +401,30 @@ BSS 77:88:99:aa:bb:cc(on wlan1)
 
         let ssid = read_ssid_from_wpa_conf(path.to_str().unwrap());
         assert_eq!(ssid, Some("My\"Net\\work".to_string()));
+    }
+
+    #[test]
+    fn test_read_network_wpa_psk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wpa.conf");
+        let conf = format_wpa_conf("PskNet", "pskpass", None, SecurityType::WpaPsk);
+        std::fs::write(&path, conf).unwrap();
+
+        let (ssid, sec) = read_network_from_wpa_conf(path.to_str().unwrap()).unwrap();
+        assert_eq!(ssid, "PskNet");
+        assert_eq!(sec, SecurityType::WpaPsk);
+    }
+
+    #[test]
+    fn test_read_network_sae() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wpa.conf");
+        let conf = format_wpa_conf("SaeNet", "saepass", None, SecurityType::Sae);
+        std::fs::write(&path, conf).unwrap();
+
+        let (ssid, sec) = read_network_from_wpa_conf(path.to_str().unwrap()).unwrap();
+        assert_eq!(ssid, "SaeNet");
+        assert_eq!(sec, SecurityType::Sae);
     }
 
     #[test]

@@ -43,6 +43,7 @@ pub struct WifiConfig {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum SecurityType {
     #[default]
     WpaPsk,

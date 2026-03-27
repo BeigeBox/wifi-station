@@ -10,6 +10,7 @@ keywords = ["wifi", "embedded", "linux", "wpa-supplicant", "networking"]
 categories = ["network-programming"]
 
 [features]
+default = []
 utoipa = ["dep:utoipa"]
 
 [dependencies]

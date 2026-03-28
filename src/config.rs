@@ -85,7 +85,7 @@ pub fn read_network_from_wpa_conf(path: &str) -> Option<(String, SecurityType)> 
         {
             ssid = Some(s.replace("\\\"", "\"").replace("\\\\", "\\"));
         }
-        if trimmed.contains("key_mgmt=SAE") {
+        if trimmed == "key_mgmt=SAE" {
             security = SecurityType::Sae;
         }
     }

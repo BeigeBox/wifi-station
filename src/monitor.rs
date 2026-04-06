@@ -87,6 +87,7 @@ pub fn run_wifi_client(
                         match reload_wifi_module_sta_first(&client.iw_bin).await {
                             Ok(()) => {
                                 tried_module_reload = true;
+                                attempt = 0;
                                 continue;
                             }
                             Err(reload_err) => {

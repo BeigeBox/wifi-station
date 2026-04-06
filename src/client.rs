@@ -102,6 +102,10 @@ impl WifiClient {
         crate::routing::restore_cellular_default().await;
 
         if let Some(resolv) = self.saved_resolv.take() {
+            let _ = Command::new("umount")
+                .arg("/etc/resolv.conf")
+                .status()
+                .await;
             let _ = tokio::fs::write("/etc/resolv.conf", resolv).await;
         }
     }

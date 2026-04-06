@@ -210,7 +210,17 @@ impl WifiClient {
             .collect::<Vec<_>>()
             .join("\n")
             + "\n";
-        tokio::fs::write("/etc/resolv.conf", resolv).await?;
+        if let Err(e) = tokio::fs::write("/etc/resolv.conf", &resolv).await {
+            warn!("/etc/resolv.conf not writable ({e}), bind-mounting from /tmp");
+            tokio::fs::write("/tmp/resolv.conf", &resolv).await?;
+            let status = Command::new("mount")
+                .args(["-o", "bind", "/tmp/resolv.conf", "/etc/resolv.conf"])
+                .status()
+                .await;
+            if !matches!(status, Ok(s) if s.success()) {
+                warn!("bind mount failed, DNS may not work via /etc/resolv.conf");
+            }
+        }
         Ok(())
     }
 

@@ -37,6 +37,7 @@ pub struct WifiConfig {
     pub dhcp_lease_path: Option<String>,
     pub wpa_conf_path: Option<String>,
     pub iw_bin: Option<String>,
+    pub udhcpc_bin: Option<String>,
     pub crash_log_dir: Option<String>,
     pub wakelock_name: Option<String>,
 }

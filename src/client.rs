@@ -30,6 +30,7 @@ pub(crate) struct WifiClient {
     pub(crate) dhcp_lease_path: String,
     pub(crate) wpa_conf_path: String,
     pub(crate) iw_bin: String,
+    pub(crate) udhcpc_bin: String,
     pub(crate) crash_log_dir: String,
 }
 
@@ -69,6 +70,10 @@ impl WifiClient {
                 .iw_bin
                 .clone()
                 .unwrap_or_else(|| DEFAULT_IW_BIN.to_string()),
+            udhcpc_bin: config
+                .udhcpc_bin
+                .clone()
+                .unwrap_or_else(|| "udhcpc".to_string()),
             crash_log_dir: config
                 .crash_log_dir
                 .clone()
@@ -269,7 +274,7 @@ impl WifiClient {
         )
         .await?;
 
-        let child = Command::new("udhcpc")
+        let child = Command::new(&self.udhcpc_bin)
             .args([
                 "-i",
                 &self.iface,

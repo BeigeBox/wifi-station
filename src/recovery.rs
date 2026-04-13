@@ -13,8 +13,13 @@ use crate::client::WifiClient;
 use crate::{AP_IFACE, STA_IFACE, WifiState, WifiStatus, detect_bridge_iface};
 
 async fn get_module_path() -> Result<String> {
-    let out = Command::new("uname").arg("-r").output().await?;
-    let kver = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    // /system/lib/modules/ is the Android convention (UZ801 etc.)
+    let fixed = "/system/lib/modules/wlan.ko";
+    if Path::new(fixed).exists() {
+        return Ok(fixed.into());
+    }
+
+    let kver = get_kernel_version().await?;
     let path = format!("/lib/modules/{kver}/extra/wlan.ko");
     if Path::new(&path).exists() {
         return Ok(path);
@@ -24,6 +29,19 @@ async fn get_module_path() -> Result<String> {
         return Ok(alt);
     }
     bail!("wlan.ko not found for kernel {kver}");
+}
+
+async fn get_kernel_version() -> Result<String> {
+    if let Ok(out) = Command::new("uname").arg("-r").output().await
+        && out.status.success()
+    {
+        return Ok(String::from_utf8_lossy(&out.stdout).trim().to_string());
+    }
+    let ver = tokio::fs::read_to_string("/proc/version").await?;
+    ver.split_whitespace()
+        .nth(2)
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow::anyhow!("could not parse kernel version from /proc/version"))
 }
 
 async fn create_sta_with_iw(iw_bin: &str) -> Result<()> {

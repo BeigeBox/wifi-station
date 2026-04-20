@@ -8,8 +8,8 @@ use tokio::time::sleep;
 
 use crate::{
     DEFAULT_CRASH_LOG_DIR, DEFAULT_DHCP_LEASE_PATH, DEFAULT_IW_BIN, DEFAULT_UDHCPC_HOOK_PATH,
-    DEFAULT_WPA_BIN, DEFAULT_WPA_CONF_PATH, HOSTAPD_CONF, STA_IFACE, UDHCPC_HOOK_SCRIPT,
-    WifiConfig,
+    DEFAULT_WPA_BIN, DEFAULT_WPA_CONF_PATH, ERR_CREATE_STA, HOSTAPD_CONF, STA_IFACE,
+    UDHCPC_HOOK_SCRIPT, WifiConfig,
 };
 
 pub(crate) const TX_STALL_THRESHOLD: u32 = 3;
@@ -148,7 +148,7 @@ impl WifiClient {
             .await?;
         if !out.status.success() {
             bail!(
-                "failed to create {}: {}",
+                "{ERR_CREATE_STA} ({}): {}",
                 self.iface,
                 String::from_utf8_lossy(&out.stderr).trim()
             );
@@ -159,7 +159,7 @@ impl WifiClient {
             .await?;
         if !out.status.success() {
             bail!(
-                "failed to set {} to managed: {}",
+                "{ERR_CREATE_STA} ({}: set type managed): {}",
                 self.iface,
                 String::from_utf8_lossy(&out.stderr).trim()
             );

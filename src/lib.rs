@@ -82,6 +82,10 @@ pub(crate) const HOSTAPD_CONF: &str = "/data/misc/wifi/hostapd.conf";
 pub(crate) const AP_IFACE: &str = "wlan0";
 pub const STA_IFACE: &str = "wlan1";
 
+/// Error prefix emitted when `iw interface add` can't create the STA iface.
+/// Matched in monitor.rs to decide whether a module reload should recover.
+pub(crate) const ERR_CREATE_STA: &str = "failed to create STA interface";
+
 const BRIDGE_CANDIDATES: &[&str] = &["bridge0", "br0"];
 
 pub fn detect_bridge_iface() -> &'static str {
@@ -283,9 +287,11 @@ BSS 77:88:99:aa:bb:cc(on wlan1)
         let path = dir.path().join("wpa_sta.conf");
         let path_str = path.to_str().unwrap();
 
-        let mut config = WifiConfig::default();
-        config.wifi_ssid = Some("TestNet".to_string());
-        config.wifi_password = Some("pass123".to_string());
+        let mut config = WifiConfig {
+            wifi_ssid: Some("TestNet".to_string()),
+            wifi_password: Some("pass123".to_string()),
+            ..Default::default()
+        };
 
         update_wpa_conf_at(&config, path_str).await;
 
@@ -305,9 +311,11 @@ BSS 77:88:99:aa:bb:cc(on wlan1)
         let path = dir.path().join("wpa_sta.conf");
         let path_str = path.to_str().unwrap();
 
-        let mut config = WifiConfig::default();
-        config.wifi_ssid = Some("TestNet".to_string());
-        config.wifi_password = None;
+        let config = WifiConfig {
+            wifi_ssid: Some("TestNet".to_string()),
+            wifi_password: None,
+            ..Default::default()
+        };
 
         update_wpa_conf_at(&config, path_str).await;
         assert!(!path.exists());

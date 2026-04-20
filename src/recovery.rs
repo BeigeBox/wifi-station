@@ -10,7 +10,7 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 use crate::client::WifiClient;
-use crate::{AP_IFACE, STA_IFACE, WifiState, WifiStatus, detect_bridge_iface};
+use crate::{AP_IFACE, ERR_CREATE_STA, STA_IFACE, WifiState, WifiStatus, detect_bridge_iface};
 
 async fn get_module_path() -> Result<String> {
     // /system/lib/modules/ is the Android convention (UZ801 etc.)
@@ -77,7 +77,7 @@ async fn create_sta_with_iw(iw_bin: &str) -> Result<()> {
         .await?;
     if !out.status.success() {
         bail!(
-            "failed to create {STA_IFACE}: {}",
+            "{ERR_CREATE_STA} ({STA_IFACE}): {}",
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
@@ -87,7 +87,7 @@ async fn create_sta_with_iw(iw_bin: &str) -> Result<()> {
         .await?;
     if !out.status.success() {
         bail!(
-            "failed to set {STA_IFACE} to managed: {}",
+            "{ERR_CREATE_STA} ({STA_IFACE}: set type managed): {}",
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }

@@ -8,6 +8,8 @@ use tokio::process::Command;
 pub struct WifiNetwork {
     /// The SSID of the access point
     pub ssid: String,
+    /// The BSSID (MAC) of the access point
+    pub bssid: String,
     /// Signal strength in dBm
     pub signal_dbm: i32,
     /// Encryption type(s) available
@@ -61,6 +63,7 @@ fn resolve_security(has_rsn: bool, has_wpa: bool, has_sae: bool, has_psk: bool) 
 pub(crate) fn parse_iw_scan(output: &str) -> Vec<WifiNetwork> {
     let mut networks: Vec<WifiNetwork> = Vec::new();
     let mut current_ssid: Option<String> = None;
+    let mut current_bssid: Option<String> = None;
     let mut current_signal: i32 = -100;
     let mut has_rsn = false;
     let mut has_wpa = false;
@@ -75,7 +78,7 @@ pub(crate) fn parse_iw_scan(output: &str) -> Vec<WifiNetwork> {
                 && !ssid.is_empty()
             {
                 let security = resolve_security(has_rsn, has_wpa, has_sae, has_psk);
-                push_or_update(&mut networks, ssid, current_signal, &security);
+                push_or_update(&mut networks, ssid, current_bssid.clone().unwrap_or_default(), current_signal, &security);
             }
             current_signal = -100;
             has_rsn = false;
@@ -83,6 +86,10 @@ pub(crate) fn parse_iw_scan(output: &str) -> Vec<WifiNetwork> {
             in_rsn_block = false;
             has_sae = false;
             has_psk = false;
+            let tokens: Vec<&str> = line.split_whitespace().collect();
+            if tokens.len() >= 2 {
+                current_bssid = Some(tokens[1].to_string());
+            }
         } else if trimmed.starts_with("RSN:") {
             has_rsn = true;
             in_rsn_block = true;
@@ -123,14 +130,14 @@ pub(crate) fn parse_iw_scan(output: &str) -> Vec<WifiNetwork> {
         && !ssid.is_empty()
     {
         let security = resolve_security(has_rsn, has_wpa, has_sae, has_psk);
-        push_or_update(&mut networks, ssid, current_signal, &security);
+        push_or_update(&mut networks, ssid, current_bssid.unwrap_or_default(), current_signal, &security);
     }
 
     networks.sort_by(|a, b| b.signal_dbm.cmp(&a.signal_dbm));
     networks
 }
 
-fn push_or_update(networks: &mut Vec<WifiNetwork>, ssid: String, signal: i32, security: &str) {
+fn push_or_update(networks: &mut Vec<WifiNetwork>, ssid: String, bssid: String, signal: i32, security: &str) {
     if let Some(existing) = networks.iter_mut().find(|n| n.ssid == ssid) {
         if signal > existing.signal_dbm {
             existing.signal_dbm = signal;
@@ -138,6 +145,7 @@ fn push_or_update(networks: &mut Vec<WifiNetwork>, ssid: String, signal: i32, se
     } else {
         networks.push(WifiNetwork {
             ssid,
+            bssid,
             signal_dbm: signal,
             security: security.to_string(),
         });

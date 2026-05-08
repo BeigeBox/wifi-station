@@ -1,3 +1,71 @@
+//! Async WiFi station (STA) lifecycle manager for embedded Linux.
+//!
+//! `wifi-station` runs and supervises a `wlan1` STA interface alongside an
+//! existing `wlan0` AP on dongles and MiFi-style devices, so a host can roam
+//! onto upstream WiFi while continuing to serve its own clients.
+//!
+//! It targets the messy realities of small embedded systems: quirky vendor
+//! drivers, busybox userspace, AP+STA coexistence locks, kernel module crashes,
+//! and stalled data paths. Recovery is built in.
+//!
+//! # Mental model
+//!
+//! [`run_wifi_client`] spawns a long-lived Tokio task that creates the STA
+//! interface, runs `wpa_supplicant` and `udhcpc`, installs policy routing so
+//! STA traffic does not displace an existing default route (e.g. cellular
+//! `rmnet`), and watches the link. When the data path stalls or the interface
+//! disappears it walks a graduated recovery ladder — `wpa_cli reassociate`,
+//! `wpa_supplicant` restart, interface cycle, and finally a full `wlan.ko`
+//! `rmmod`/`insmod` — before giving up after a fixed cap.
+//!
+//! Live state is published through a [`WifiStatus`] held behind an
+//! `Arc<RwLock<_>>` so the rest of the application can read it. Shutdown is
+//! cooperative via a [`CancellationToken`].
+//!
+//! [`CancellationToken`]: tokio_util::sync::CancellationToken
+//!
+//! # Quick start
+//!
+//! ```no_run
+//! use std::sync::Arc;
+//! use tokio::sync::RwLock;
+//! use tokio_util::sync::CancellationToken;
+//! use tokio_util::task::TaskTracker;
+//! use wifi_station::{WifiConfig, WifiStatus, run_wifi_client};
+//!
+//! # async fn run() {
+//! let tasks = TaskTracker::new();
+//! let shutdown = CancellationToken::new();
+//! let status = Arc::new(RwLock::new(WifiStatus::default()));
+//!
+//! let config = WifiConfig { wifi_enabled: true, ..Default::default() };
+//! run_wifi_client(&tasks, &config, shutdown.clone(), status.clone());
+//!
+//! // ...later, on shutdown:
+//! shutdown.cancel();
+//! tasks.close();
+//! tasks.wait().await;
+//! # }
+//! ```
+//!
+//! Provisioning a network means writing the `wpa_supplicant` config file
+//! before (or while) the supervisor is running; [`format_wpa_conf`] and
+//! [`update_wpa_conf`] are safe writers that escape user-supplied SSIDs and
+//! passwords. [`scan_wifi_networks`] performs a one-shot scan via `iw`.
+//!
+//! # Runtime requirements
+//!
+//! The host must provide `iw`, `wpa_supplicant`, `udhcpc`, `ip`, and
+//! `killall` on `PATH` (or paths configured via [`WifiConfig`]).
+//! Module-reload recovery additionally uses `rmmod`, `insmod`, `hostapd`,
+//! `brctl`, and `ifconfig`. Defaults match a typical busybox + Android-derived
+//! rootfs.
+//!
+//! # Cargo features
+//!
+//! - `utoipa` — derives `utoipa::ToSchema` on [`WifiStatus`], [`WifiState`],
+//!   [`SecurityType`], and [`WifiNetwork`] for inclusion in OpenAPI specs.
+
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
